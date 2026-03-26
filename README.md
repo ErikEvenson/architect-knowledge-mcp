@@ -1,13 +1,16 @@
 # Architect Knowledge MCP Server
 
+[![npm version](https://img.shields.io/npm/v/@eevenson/architect-knowledge-mcp)](https://www.npmjs.com/package/@eevenson/architect-knowledge-mcp)
+
 An [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) server that provides cloud architecture guidance from a curated knowledge library. Use it with Claude Desktop, Claude Code, Cursor, or any MCP-compatible client to get specific, checklist-driven architecture advice.
 
 ## What's in the knowledge library?
 
 - **330+ curated files** covering cloud architecture best practices
-- **Providers:** AWS, Azure, GCP, Kubernetes, VMware, Nutanix, Cisco, Dell, HPE, NetApp, and 40+ more
-- **Compliance:** HIPAA, PCI-DSS, SOC2, FedRAMP, GDPR, CCPA, CJIS, ITAR, and more
-- **Patterns:** Microservices, hybrid cloud, edge computing, AI/ML infrastructure, migration patterns
+- **Providers:** AWS, Azure, GCP, Kubernetes, VMware, Nutanix, Cisco, Dell, HPE, NetApp, Pure Storage, Snowflake, Databricks, Confluent/Kafka, MongoDB, Redis, Elasticsearch, CrowdStrike, Okta, GitLab, ArgoCD, and 40+ more
+- **Compliance:** HIPAA, PCI-DSS, SOC2, FedRAMP, GDPR, CCPA, CJIS, ITAR, ISO 27001, NIST/CMMC, and more
+- **Patterns:** Microservices, hybrid cloud, edge computing, AI/ML infrastructure, application modernization, security operations, migration patterns
+- **General:** Networking, compute, storage, identity, observability, disaster recovery, cost management, messaging, supply chain security, performance testing
 - **Checklists:** Every item tagged `[Critical]`, `[Recommended]`, or `[Optional]`
 
 The knowledge library is sourced from the public [ErikEvenson/architect](https://github.com/ErikEvenson/architect) repository. No client data, project files, or private content is included.
@@ -16,7 +19,10 @@ The knowledge library is sourced from the public [ErikEvenson/architect](https:/
 
 ### Claude Desktop
 
-Add to your Claude Desktop config (`~/Library/Application Support/Claude/claude_desktop_config.json` on macOS):
+Add to your Claude Desktop config file (or use **Settings > Developer > Edit Config**):
+
+- **macOS:** `~/Library/Application Support/Claude/claude_desktop_config.json`
+- **Windows:** `%APPDATA%\Claude\claude_desktop_config.json`
 
 ```json
 {
@@ -28,10 +34,18 @@ Add to your Claude Desktop config (`~/Library/Application Support/Claude/claude_
   }
 }
 ```
+
+Restart Claude Desktop. A hammer icon will appear at the bottom of the chat input when the tools are available.
 
 ### Claude Code
 
-Add to your Claude Code settings:
+Run this from the Claude Code prompt:
+
+```
+claude mcp add architect-knowledge -- npx @eevenson/architect-knowledge-mcp
+```
+
+Or add to your settings JSON:
 
 ```json
 {
@@ -43,6 +57,10 @@ Add to your Claude Code settings:
   }
 }
 ```
+
+### Other MCP Clients
+
+Works with any MCP-compatible client including Cursor, Windsurf, Cline, and Continue. Consult your client's documentation for how to add MCP servers.
 
 ## Tools
 
@@ -70,7 +88,19 @@ Read a complete knowledge file.
 **Parameters:**
 - `path` (required) — File path, e.g. `"providers/aws/containers.md"`
 
-## How it works
+## Example Usage
+
+Once connected, just ask architecture questions naturally:
+
+- "What are the critical checklist items for HIPAA compliance?"
+- "Search for Kubernetes storage best practices"
+- "What should I consider for a VMware to Nutanix migration?"
+- "Show me the AWS containers checklist"
+- "What compliance frameworks cover encryption requirements?"
+
+Claude will automatically call the MCP tools to ground its answers in the knowledge library's curated checklists.
+
+## How It Works
 
 1. On first run, fetches knowledge files from the public GitHub repo
 2. Caches files locally in `~/.cache/architect-knowledge-mcp/`
@@ -78,14 +108,39 @@ Read a complete knowledge file.
 4. Indexes all files using lightweight text search (BM25) for instant startup
 5. Exposes three MCP tools for searching, browsing, and reading
 
-No embedding models, no GPUs, no external databases. The package is <5MB and starts instantly after initial cache.
+No embedding models, no GPUs, no external databases. The package is ~15KB and starts instantly after initial cache.
 
-## Data safety
+## Data Safety
 
 - Only reads from the public `knowledge/` directory in the GitHub repo
+- Allowlisted directories only: `general`, `providers`, `patterns`, `compliance`, `frameworks`, `failures`
 - Never accesses client data, project uploads, or database content
 - Runs entirely on your machine — no data sent anywhere except to the LLM you're already using
 - No API keys required (optional `GITHUB_TOKEN` env var to avoid rate limits)
+
+## Development
+
+```bash
+git clone https://github.com/ErikEvenson/architect-knowledge-mcp.git
+cd architect-knowledge-mcp
+npm install
+npm run build
+npm test
+```
+
+## Troubleshooting
+
+**Tools not showing in Claude Desktop?**
+- Restart Claude Desktop after editing the config
+- Check logs at `~/Library/Logs/Claude/mcp-server-architect-knowledge.log` (macOS)
+- Verify Node.js 18+ is installed: `node --version`
+
+**Slow first startup?**
+- The first run fetches ~330 files from GitHub (takes 15-30 seconds)
+- Subsequent runs use the local cache and start instantly
+
+**GitHub rate limiting?**
+- Set `GITHUB_TOKEN` environment variable with a personal access token (no scopes needed for public repos)
 
 ## License
 
