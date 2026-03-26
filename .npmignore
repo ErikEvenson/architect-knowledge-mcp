@@ -1,0 +1,9 @@
+# Only ship the build/ directory (enforced by "files" in package.json).
+# This .npmignore is a safety net — even if "files" is misconfigured,
+# nothing outside build/ should ever be published.
+src/
+tsconfig.json
+.gitignore
+.github/
+*.md
+!build/**

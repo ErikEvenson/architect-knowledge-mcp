@@ -1,0 +1,46 @@
+{
+  "name": "@eevenson/architect-knowledge-mcp",
+  "version": "0.1.0",
+  "description": "MCP server for the Architect knowledge library — cloud architecture checklists, vendor guidance, and compliance frameworks",
+  "type": "module",
+  "bin": {
+    "architect-knowledge-mcp": "./build/index.js"
+  },
+  "files": [
+    "build",
+    "!build/test.*"
+  ],
+  "scripts": {
+    "build": "tsc && chmod 755 build/index.js",
+    "prepare": "npm run build",
+    "test": "node --test build/test.js"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "cloud-architecture",
+    "knowledge-base",
+    "checklists",
+    "compliance",
+    "infrastructure"
+  ],
+  "author": "Erik Evenson",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ErikEvenson/architect-knowledge-mcp.git"
+  },
+  "homepage": "https://github.com/ErikEvenson/architect-knowledge-mcp#readme",
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "minisearch": "^7.1.1",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.7.0"
+  }
+}
