@@ -58,6 +58,21 @@ Or add to your settings JSON:
 }
 ```
 
+### LM Studio
+
+Requires LM Studio 0.3.17+. Go to **Program tab > Install > Edit mcp.json** and add:
+
+```json
+{
+  "mcpServers": {
+    "architect-knowledge": {
+      "command": "npx",
+      "args": ["@eevenson/architect-knowledge-mcp"]
+    }
+  }
+}
+```
+
 ### Other MCP Clients
 
 Works with any MCP-compatible client including Cursor, Windsurf, Cline, and Continue. Consult your client's documentation for how to add MCP servers.
