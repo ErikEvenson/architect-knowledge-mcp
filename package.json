@@ -1,6 +1,6 @@
 {
   "name": "@eevenson/architect-knowledge-mcp",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "MCP server for the Architect knowledge library — cloud architecture checklists, vendor guidance, and compliance frameworks",
   "type": "module",
   "bin": {
