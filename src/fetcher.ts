@@ -75,6 +75,50 @@ interface CacheManifest {
   fileCount: number;
 }
 
+/**
+ * Provenance for the snapshot currently being served (#4).
+ *
+ * Every tool response carries this. Without it a stale answer is byte-for-byte
+ * identical to a fresh one, and a zero-result search reads as authoritative
+ * absence rather than "this process last looked at the repo hours ago". That
+ * ambiguity caused a consumer to report four non-existent coverage gaps in a
+ * library that contained all four files.
+ */
+export interface SnapshotInfo {
+  commitSha: string;
+  fetchedAt: string;
+  fileCount: number;
+  ageMs: number;
+}
+
+export function getSnapshotInfo(): SnapshotInfo | null {
+  const manifest = readCacheManifest();
+  if (!manifest) return null;
+  const fetchedMs = Date.parse(manifest.fetchedAt);
+  return {
+    commitSha: manifest.commitSha,
+    fetchedAt: manifest.fetchedAt,
+    fileCount: manifest.fileCount,
+    ageMs: Number.isNaN(fetchedMs) ? Number.POSITIVE_INFINITY : Date.now() - fetchedMs,
+  };
+}
+
+/**
+ * Is the repo's HEAD still the commit we have cached?
+ *
+ * Separated from `fetchKnowledgeFiles` so freshness can be re-checked on a TTL
+ * during a long-lived session, instead of once per process at boot.
+ * Returns `null` when GitHub is unreachable — an unknown answer, which callers
+ * must not treat as "fresh".
+ */
+export async function checkForNewCommit(): Promise<string | null> {
+  try {
+    return await getLatestCommitSha();
+  } catch {
+    return null;
+  }
+}
+
 class RateLimitError extends Error {
   constructor(message: string) {
     super(message);

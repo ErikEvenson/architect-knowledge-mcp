@@ -15,7 +15,12 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 
-import { fetchKnowledgeFiles } from "./fetcher.js";
+import {
+  fetchKnowledgeFiles,
+  checkForNewCommit,
+  getSnapshotInfo,
+  type SnapshotInfo,
+} from "./fetcher.js";
 import type { KnowledgeFile } from "./fetcher.js";
 import { parseAllFiles, buildCategoryTree } from "./parser.js";
 import { KnowledgeSearch } from "./search.js";
@@ -24,13 +29,92 @@ import { KnowledgeSearch } from "./search.js";
 let knowledgeFiles: KnowledgeFile[] = [];
 let searchEngine: KnowledgeSearch | null = null;
 
+// ── Freshness (#4) ──
+// The index used to be built exactly once per process. An MCP server attached
+// to a long-lived client session runs for hours while the knowledge repo moves
+// underneath it, so the served snapshot aged without bound and nothing in any
+// response revealed which snapshot had answered. Re-check HEAD on a TTL, and
+// stamp every response with the snapshot's provenance.
+const FRESHNESS_TTL_MS = 15 * 60 * 1000; // 15 min
+const STALE_WARN_MS = 60 * 60 * 1000; // warn in-band past 1h
+let lastFreshnessCheck = 0;
+let refreshInFlight: Promise<void> | null = null;
+
 async function initializeKnowledge(): Promise<void> {
   knowledgeFiles = await fetchKnowledgeFiles();
   const chunks = parseAllFiles(knowledgeFiles);
   searchEngine = new KnowledgeSearch();
   searchEngine.buildIndex(chunks);
+  lastFreshnessCheck = Date.now();
   console.error(
     `Indexed ${searchEngine.chunkCount} chunks from ${knowledgeFiles.length} knowledge files`,
+  );
+}
+
+/**
+ * Re-check HEAD if the TTL has elapsed, and rebuild the index if it moved.
+ *
+ * Cheap in the steady state: one GitHub API call per TTL, and `fetchKnowledgeFiles`
+ * short-circuits to the disk cache when the SHA is unchanged. Failures are
+ * deliberately swallowed — a GitHub outage must degrade to serving the current
+ * snapshot, never to failing the user's query. `force` bypasses the TTL for the
+ * explicit refresh tool.
+ */
+async function ensureFresh(force = false): Promise<void> {
+  if (!force && Date.now() - lastFreshnessCheck < FRESHNESS_TTL_MS) return;
+  if (refreshInFlight) return refreshInFlight; // collapse concurrent callers
+
+  refreshInFlight = (async () => {
+    try {
+      const latest = await checkForNewCommit();
+      lastFreshnessCheck = Date.now();
+      if (latest === null) return; // unreachable != fresh; try again next TTL
+      const current = getSnapshotInfo();
+      if (current && current.commitSha === latest) return;
+      console.error(
+        `Knowledge repo moved ${current?.commitSha.slice(0, 7) ?? "none"} -> ${latest.slice(0, 7)}, rebuilding index`,
+      );
+      await initializeKnowledge();
+    } catch (err) {
+      console.error(`Freshness re-check failed (serving current snapshot): ${err}`);
+    } finally {
+      refreshInFlight = null;
+    }
+  })();
+
+  return refreshInFlight;
+}
+
+function formatAge(ms: number): string {
+  if (!Number.isFinite(ms)) return "unknown age";
+  const m = Math.floor(ms / 60000);
+  if (m < 1) return "just now";
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  return h < 24 ? `${h}h ${m % 60}m ago` : `${Math.floor(h / 24)}d ${h % 24}h ago`;
+}
+
+/** Provenance footer appended to every tool response. */
+function provenance(): string {
+  const s: SnapshotInfo | null = getSnapshotInfo();
+  if (!s) return "\n\n---\nknowledge snapshot: unknown (no cache manifest)";
+  const stale = s.ageMs > STALE_WARN_MS ? "  ⚠ STALE" : "";
+  return (
+    `\n\n---\nknowledge snapshot ${s.commitSha.slice(0, 7)} · ` +
+    `${s.fileCount} files · fetched ${formatAge(s.ageMs)}${stale}`
+  );
+}
+
+/** Extra warning for an empty result set, where staleness does its damage. */
+function emptyResultCaveat(): string {
+  const s = getSnapshotInfo();
+  if (!s) return "";
+  if (s.ageMs <= STALE_WARN_MS) return "";
+  return (
+    `\n\n**A zero-result search is not proof of absence here.** This snapshot was ` +
+    `fetched ${formatAge(s.ageMs)} (commit ${s.commitSha.slice(0, 7)}); files added ` +
+    `since are invisible to it. Run \`refresh_knowledge\` before concluding the ` +
+    `library lacks this topic.`
   );
 }
 
@@ -76,6 +160,7 @@ server.registerTool(
     },
   },
   async ({ query, top_k, priority_filter, file_filter }) => {
+    await ensureFresh();
     if (!searchEngine) {
       return {
         content: [
@@ -102,7 +187,10 @@ server.registerTool(
         content: [
           {
             type: "text" as const,
-            text: `No results found for "${query}". Try broader terms or check available categories with list_categories.`,
+            text:
+              `No results found for "${query}". Try broader terms or check available categories with list_categories.` +
+              emptyResultCaveat() +
+              provenance(),
           },
         ],
       };
@@ -124,7 +212,9 @@ server.registerTool(
       content: [
         {
           type: "text" as const,
-          text: `Found ${results.length} results for "${query}":\n\n${formatted}`,
+          text:
+            `Found ${results.length} results for "${query}":\n\n${formatted}` +
+            provenance(),
         },
       ],
     };
@@ -150,6 +240,7 @@ server.registerTool(
     },
   },
   async ({ category }) => {
+    await ensureFresh();
     if (knowledgeFiles.length === 0) {
       return {
         content: [
@@ -206,7 +297,7 @@ server.registerTool(
     }
 
     return {
-      content: [{ type: "text" as const, text: output }],
+      content: [{ type: "text" as const, text: output + provenance() }],
     };
   },
 );
@@ -229,6 +320,7 @@ server.registerTool(
     },
   },
   async ({ path }) => {
+    await ensureFresh();
     const file = knowledgeFiles.find(
       (f) => f.path === path || f.path === path.replace(/^knowledge\//, ""),
     );
@@ -247,7 +339,9 @@ server.registerTool(
       }
 
       return {
-        content: [{ type: "text" as const, text: msg }],
+        content: [
+          { type: "text" as const, text: msg + emptyResultCaveat() + provenance() },
+        ],
       };
     }
 
@@ -255,10 +349,46 @@ server.registerTool(
       content: [
         {
           type: "text" as const,
-          text: `# ${file.path}\n\n${file.content}`,
+          text: `# ${file.path}\n\n${file.content}` + provenance(),
         },
       ],
     };
+  },
+);
+
+// Tool: refresh_knowledge (#4)
+server.registerTool(
+  "refresh_knowledge",
+  {
+    description:
+      "Force a re-check of the knowledge repository and rebuild the index if it has moved. " +
+      "Use when you suspect the served snapshot is stale — in particular after editing the " +
+      "knowledge repo in the same session, or when a search returns nothing for a topic you " +
+      "believe is covered. Returns the snapshot before and after.",
+    inputSchema: {},
+  },
+  async () => {
+    const before = getSnapshotInfo();
+    await ensureFresh(true);
+    const after = getSnapshotInfo();
+
+    if (!after) {
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: "Refresh attempted but no cache manifest is present — GitHub may be unreachable.",
+          },
+        ],
+      };
+    }
+
+    const moved = before?.commitSha !== after.commitSha;
+    const text = moved
+      ? `Knowledge refreshed: ${before?.commitSha.slice(0, 7) ?? "none"} -> ${after.commitSha.slice(0, 7)} (${after.fileCount} files).`
+      : `Already current at ${after.commitSha.slice(0, 7)} (${after.fileCount} files); nothing to rebuild.`;
+
+    return { content: [{ type: "text" as const, text: text + provenance() }] };
   },
 );
 
